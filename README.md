@@ -28,6 +28,6 @@ Drop the `UStaminaManagerComponent` on any Character for instant stamina, regene
 - `OnJumpPerformed` → Different feedback for Normal / Exhausted / Air jumps
 
 ## Example in This Repo
-Contains a Blueprint child component (`BP_StaminaManager_NoFallRegen`) that overrides `CanRegenerate` so stamina **does not regenerate while falling**. Use it as a template for Hunger, Fatigue, or movement-based rules.
+Contains a Blueprint child component (`StaminaManagerCompOverride`) that overrides `CanRegenerate` so stamina **does not regenerate while falling**. Use it as a template for Hunger, Fatigue, or movement-based rules.
 
 100% multiplayer ready • No dependencies • Works with your existing damage system.
