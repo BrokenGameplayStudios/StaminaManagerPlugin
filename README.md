@@ -30,4 +30,4 @@ Drop the `UStaminaManagerComponent` on any Character for instant stamina, regene
 ## Example in This Repo
 Contains a Blueprint child component (`StaminaManagerCompOverride`) that overrides `CanRegenerate` so stamina **does not regenerate while falling**. Use it as a template for Hunger, Fatigue, or movement-based rules.
 
-100% multiplayer ready • No dependencies • Works with your existing damage system.
+100% multiplayer ready • No dependencies
