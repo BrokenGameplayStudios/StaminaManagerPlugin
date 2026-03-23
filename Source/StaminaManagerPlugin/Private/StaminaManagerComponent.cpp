@@ -1,5 +1,3 @@
-// StaminaManagerComponent.cpp
-
 #include "StaminaManagerComponent.h"
 #include "GameFramework/Character.h"
 
@@ -16,7 +14,6 @@ void UStaminaManagerComponent::BeginPlay()
     CurrentStamina = MaxStamina;
     BroadcastStaminaChange();
 
-    // Safely cache movement component (only works on ACharacter owners)
     if (ACharacter* CharacterOwner = Cast<ACharacter>(GetOwner()))
     {
         CachedMovementComponent = CharacterOwner->GetCharacterMovement();
@@ -30,7 +27,6 @@ void UStaminaManagerComponent::BeginPlay()
 void UStaminaManagerComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
     DOREPLIFETIME(UStaminaManagerComponent, MaxStamina);
     DOREPLIFETIME(UStaminaManagerComponent, CurrentStamina);
     DOREPLIFETIME(UStaminaManagerComponent, CurrentConsumptionRate);
@@ -40,17 +36,129 @@ void UStaminaManagerComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 void UStaminaManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
+    UpdateGroundState();               
     UpdateAutoMovementConsumption();
     UpdateStamina(DeltaTime);
 }
 
+void UStaminaManagerComponent::UpdateGroundState()
+{
+    if (!CachedMovementComponent || !GetOwner() || !GetOwner()->HasAuthority()) return;
+
+    const bool bCurrentlyOnGround = CachedMovementComponent->IsMovingOnGround();
+
+    if (bCurrentlyOnGround && !bWasOnGroundLastTick)
+    {
+        AirJumpsUsed = 0;  
+    }
+
+    if (bCurrentlyOnGround)
+    {
+        LastGroundTime = GetWorld()->GetTimeSeconds();
+    }
+
+    bWasOnGroundLastTick = bCurrentlyOnGround;
+}
+
+bool UStaminaManagerComponent::CanPerformGroundJump() const
+{
+    if (!CachedMovementComponent) return false;
+
+    const bool bOnGround = CachedMovementComponent->IsMovingOnGround();
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    return bOnGround || (CurrentTime - LastGroundTime <= CoyoteTime);
+}
+
+// ===================================================================
+// Jump Functions (Ground-only + Coyote + Optional Air Jumps + Weak fallback)
+// ===================================================================
+
+void UStaminaManagerComponent::StartJumping()
+{
+    ACharacter* Char = Cast<ACharacter>(GetOwner());
+    if (!Char) return;
+
+    if (!bAutoManageJumping)
+    {
+        Char->Jump();
+        return;
+    }
+
+    if (CanPerformGroundJump())
+    {
+        // Ground jump (normal or weak fallback)
+        const bool bHasEnoughForNormal = HasEnoughStamina(JumpStaminaCost);
+        const float JumpPower = bHasEnoughForNormal ? NormalJumpZVelocity : ExhaustedJumpZVelocity;
+
+        Char->LaunchCharacter(FVector(0.0f, 0.0f, JumpPower), false, true);
+        Server_StartJumping();  // server handles cost + authoritative launch + notification
+    }
+    else if (MaxAirJumps > 0 && AirJumpsUsed < MaxAirJumps)
+    {
+        // Air jump
+        Char->LaunchCharacter(FVector(0.0f, 0.0f, AirJumpZVelocity), false, true);
+        Server_StartJumping();  // server handles cost + notification
+    }
+}
+
+void UStaminaManagerComponent::StopJumping()
+{
+    if (ACharacter* Char = Cast<ACharacter>(GetOwner()))
+    {
+        Char->StopJumping();
+    }
+}
+
+void UStaminaManagerComponent::PerformJump()
+{
+    StartJumping();
+    GetWorld()->GetTimerManager().SetTimerForNextTick([this]()
+    {
+        StopJumping();
+    });
+}
+
+bool UStaminaManagerComponent::Server_StartJumping_Validate() { return true; }
+
+void UStaminaManagerComponent::Server_StartJumping_Implementation()
+{
+    ACharacter* Char = Cast<ACharacter>(GetOwner());
+    if (!Char || !CachedMovementComponent) return;
+
+    const bool bGroundJump = CanPerformGroundJump();
+
+    if (bGroundJump)
+    {
+        const bool bHasEnoughForNormal = HasEnoughStamina(JumpStaminaCost);
+        const float JumpPower = bHasEnoughForNormal ? NormalJumpZVelocity : ExhaustedJumpZVelocity;
+
+        if (bHasEnoughForNormal && JumpStaminaCost > 0.0f)
+        {
+            SpendStamina(JumpStaminaCost);
+        }
+
+        Char->LaunchCharacter(FVector(0.0f, 0.0f, JumpPower), false, true);
+        Multicast_JumpPerformed(bHasEnoughForNormal ? EStaminaJumpType::Normal : EStaminaJumpType::Exhausted);
+    }
+    else if (MaxAirJumps > 0 && AirJumpsUsed < MaxAirJumps)
+    {
+        AirJumpsUsed++;
+        if (AirJumpStaminaCost > 0.0f)
+        {
+            SpendStamina(AirJumpStaminaCost);
+        }
+
+        Char->LaunchCharacter(FVector(0.0f, 0.0f, AirJumpZVelocity), false, true);
+        Multicast_JumpPerformed(EStaminaJumpType::Air);
+    }
+}
+
 void UStaminaManagerComponent::UpdateAutoMovementConsumption()
 {
-    if (!bAutoManageWalkingCost || !CachedMovementComponent || !GetOwner()->HasAuthority()) return;
+    if (!bAutoManageWalkingCost || !CachedMovementComponent || !(GetOwner() && GetOwner()->HasAuthority())) return;
 
-    bool bIsMoving = CachedMovementComponent->Velocity.Size2D() > 10.0f &&
-        CachedMovementComponent->IsMovingOnGround();
+    bool bIsMoving = CachedMovementComponent->Velocity.Size2D() > 10.0f && CachedMovementComponent->IsMovingOnGround();
 
     float DesiredRate = 0.0f;
     if (bIsSprinting)
@@ -73,28 +181,25 @@ void UStaminaManagerComponent::UpdateStamina(float DeltaTime)
     const float PreviousStamina = CurrentStamina;
     bool bChanged = false;
 
-    // Regeneration (always attempts if allowed)
     if (CanRegenerate())
     {
         CurrentStamina += RegenRate * DeltaTime;
         bChanged = true;
     }
 
-    // Consumption tax (applied on top of regeneration)
     if (CurrentConsumptionRate > 0.0f)
     {
         CurrentStamina -= CurrentConsumptionRate * DeltaTime;
         bChanged = true;
     }
 
-    // Clamp to valid range
     CurrentStamina = FMath::Clamp(CurrentStamina, 0.0f, MaxStamina);
 
     if (bChanged)
     {
         BroadcastStaminaChange();
 
-        if (GetOwner()->HasAuthority())
+        if (GetOwner() && GetOwner()->HasAuthority())
         {
             CheckForDepletion(PreviousStamina);
             CheckForStaminaFull(PreviousStamina);
@@ -153,6 +258,11 @@ void UStaminaManagerComponent::Multicast_StaminaFull_Implementation()
     OnStaminaFull.Broadcast();
 }
 
+void UStaminaManagerComponent::Multicast_JumpPerformed_Implementation(EStaminaJumpType JumpType)
+{
+    OnJumpPerformed.Broadcast(JumpType);
+}
+
 void UStaminaManagerComponent::AutoStopSprintIfNeeded()
 {
     if (bAutoManageSprinting && bIsSprinting)
@@ -167,7 +277,7 @@ void UStaminaManagerComponent::OnRep_CurrentStamina()
 }
 
 // ===================================================================
-// Stamina Core Functions
+// Core Functions 
 // ===================================================================
 
 void UStaminaManagerComponent::SetMaxStamina(float NewMaxStamina, bool bClampCurrentStamina)
@@ -179,7 +289,7 @@ void UStaminaManagerComponent::SetMaxStamina(float NewMaxStamina, bool bClampCur
         {
             const float Old = CurrentStamina;
             CurrentStamina = FMath::Min(CurrentStamina, MaxStamina);
-            if (CurrentStamina != Old && GetOwner()->HasAuthority())
+            if (CurrentStamina != Old && GetOwner() && GetOwner()->HasAuthority())
             {
                 CheckForDepletion(Old);
             }
@@ -198,7 +308,7 @@ void UStaminaManagerComponent::SetCurrentStamina(float NewCurrentStamina)
         CurrentStamina = Clamped;
         BroadcastStaminaChange();
 
-        if (GetOwner()->HasAuthority())
+        if (GetOwner() && GetOwner()->HasAuthority())
         {
             CheckForDepletion(OldStamina);
         }
@@ -221,7 +331,7 @@ void UStaminaManagerComponent::SpendStamina(float Amount)
     {
         BroadcastStaminaChange();
 
-        if (GetOwner()->HasAuthority())
+        if (GetOwner() && GetOwner()->HasAuthority())
         {
             Multicast_StaminaSpent(Amount);
             CheckForDepletion(OldStamina);
@@ -238,10 +348,6 @@ bool UStaminaManagerComponent::TrySpendStamina(float Amount)
     }
     return false;
 }
-
-// ===================================================================
-// Consumption & Regeneration
-// ===================================================================
 
 void UStaminaManagerComponent::StartConsumption(float RatePerSecond)
 {
@@ -273,10 +379,6 @@ float UStaminaManagerComponent::GetStaminaPercentage() const
     return MaxStamina > 0.0f ? CurrentStamina / MaxStamina : 0.0f;
 }
 
-// ===================================================================
-// Sprint Functions
-// ===================================================================
-
 void UStaminaManagerComponent::StartSprinting()
 {
     if (bAutoManageSprinting)
@@ -293,10 +395,7 @@ void UStaminaManagerComponent::StopSprinting()
     }
 }
 
-bool UStaminaManagerComponent::Server_SetSprinting_Validate(bool bNewSprinting)
-{
-    return true;
-}
+bool UStaminaManagerComponent::Server_SetSprinting_Validate(bool bNewSprinting) { return true; }
 
 void UStaminaManagerComponent::Server_SetSprinting_Implementation(bool bNewSprinting)
 {
