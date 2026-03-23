@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Stamina Manager Plugin",
+	"Description": "Standalone stamina system with auto-regen, continuous drain, one-shot spend, and UI delegates. Designed for easy inheritance (Hunger, Fatigue, etc.).",
+	"Category": "Other",
+	"CreatedBy": "Broken Gameplay Studios, LLC",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "StaminaManagerPlugin",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
