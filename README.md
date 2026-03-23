@@ -1,43 +1,33 @@
 # Stamina Manager Plugin
 
-A clean, standalone, fully replicated stamina system for Unreal Engine 5.  
-Drop it on any Character and go. Designed for easy extension (Hunger, Fatigue, etc.).
+A clean, fully replicated stamina system for Unreal Engine 5.  
+Drop the `UStaminaManagerComponent` on any Character for instant stamina, regeneration, consumption, sprinting, and advanced jumping.
 
-## Features
-- Current + Max Stamina (replicated)
-- Always-active regeneration (BlueprintNativeEvent so child classes can override for Hunger/Calories)
-- Consumption tax system (walking + sprinting + manual)
-- Optional auto-walking cost
-- Optional auto-sprint (speed + consumption)
-- Replicated delegates:
-  - OnStaminaChanged (for UI)
-  - OnStaminaSpent (jumps, abilities, VFX)
-  - OnStaminaDepleted (out of breath)
-  - OnStaminaExhausted (pain/slowdown from other plugins)
-  - OnStaminaFull (energized VFX)
-- 100% multiplayer ready
-- No dependencies
+## What It Does
+- Current + Max Stamina (fully replicated)
+- Always-active regeneration (`CanRegenerate` is Blueprint-overridable)
+- Consumption tax (walking + sprinting + manual)
+- Optional auto-sprint (speed + cost)
+- Advanced jumping:
+  - Coyote Time
+  - Weak/exhausted jumps when low on stamina
+  - Optional air jumps (double/triple jump support)
+  - Variable height (hold button = higher jump)
 
-## Installation
-1. Create folder `Plugins/StaminaManagerPlugin` in your project
-2. Place the two files below inside:
-   - `StaminaManagerComponent.h` → `Source/StaminaManagerPlugin/Public/`
-   - `StaminaManagerComponent.cpp` → `Source/StaminaManagerPlugin/Private/`
-3. Add the .uplugin file (or just enable the plugin in Editor)
-4. Restart Editor
+## Main Functions
+- `StartJumping` / `StopJumping` (bind to input)
+- `StartSprinting` / `StopSprinting`
+- `SpendStamina` / `TrySpendStamina`
+- `SetCanRegenerate`
 
-## Quick Start
-1. Add **Stamina Manager Component** to your Character
-2. (Optional) Tick **Auto Manage Walking Cost** + set rate
-3. (Optional) Tick **Auto Manage Sprinting** + set Sprint Speed & rate
-4. Bind inputs:
-   - Sprint Pressed → `StartSprinting`
-   - Sprint Released → `StopSprinting`
-5. For jumps/abilities: `TrySpendStamina(20.0)` or `SpendStamina(20.0)`
+## Delegates (bind anywhere)
+- `OnStaminaChanged` → UI progress bar + text
+- `OnStaminaSpent` → Jump/ability VFX & sounds
+- `OnStaminaDepleted` / `OnStaminaExhausted` → Exhaustion effects
+- `OnStaminaFull`
+- `OnJumpPerformed` → Different feedback for Normal / Exhausted / Air jumps
 
-## Delegates (bind in Character or Widget)
-- **On Stamina Changed** → Update progress bar + text
-- **On Stamina Spent** → Jump whoosh sound / particles
-- **On Stamina Depleted** → Heavy breathing
-- **On Stamina Exhausted** → Pain, slowdown, other plugins react
-- **On Stamina Full** → Energized VFX / sound
+## Example in This Repo
+Contains a Blueprint child component (`BP_StaminaManager_NoFallRegen`) that overrides `CanRegenerate` so stamina **does not regenerate while falling**. Use it as a template for Hunger, Fatigue, or movement-based rules.
+
+100% multiplayer ready • No dependencies • Works with your existing damage system.
